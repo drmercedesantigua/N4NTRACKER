@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<head<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>N4N Tracker | Case Management & Housing Intelligence</title>
@@ -112,6 +112,54 @@ const toDB=f=>({
   action_needed:f.actionNeeded||null, photo_url:f.photo||null, members:f.members||[]
 });
 
+async function saveCaseNote({caresId, caseManager, noteText}) {
+  const trimmed = (noteText || '').trim();
+  if (!trimmed || !caresId) return { error: new Error('Falta el texto o el CARES ID de la nota.') };
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) {
+    return { error: new Error('Debes iniciar sesión antes de guardar una nota.') };
+  }
+
+  const { error } = await supabase.from('case_notes').insert([
+    {
+      cares_id: String(caresId),
+      case_manager: caseManager || 'Unassigned',
+      note_text: trimmed,
+      created_at: new Date().toISOString()
+    }
+  ]);
+
+  if (error) {
+    const msg = error.message || 'No se pudo guardar la nota.';
+    const friendly = msg.includes('row-level security')
+      ? 'La tabla case_notes tiene RLS activo. Debes permitir INSERT para usuarios autenticados en Supabase.'
+      : msg.includes('does not exist')
+        ? 'La tabla case_notes no existe en Supabase. Créala primero y vuelve a intentarlo.'
+        : msg;
+    return { error: new Error(friendly) };
+  }
+
+  return { error: null };
+}
+
+async function loadCaseNotesForResident(caresId) {
+  if (!caresId) return [];
+
+  const { data, error } = await supabase
+    .from('case_notes')
+    .select('*')
+    .eq('cares_id', String(caresId))
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error loading case notes:', error);
+    throw error;
+  }
+
+  return data || [];
+}
+
 // Compress image before upload
 const compressImage=(file,maxWidth=900,quality=0.75)=>new Promise((resolve,reject)=>{
   if(!file||!file.type.startsWith('image/')){reject(new Error('Not an image'));return;}
@@ -138,6 +186,37 @@ const compressImage=(file,maxWidth=900,quality=0.75)=>new Promise((resolve,rejec
 
 function KPI({label,value,icon,sub}){return <div className="card p-5 print-card"><div className="flex justify-between"><div><div className="text-xs uppercase tracking-wider font-bold text-slate-500">{label}</div><div className="text-3xl font-extrabold mt-2 text-slate-900">{value}</div>{sub&&<div className="text-xs text-slate-500 mt-1">{sub}</div>}</div><div className="w-11 h-11 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center"><i className={icon}></i></div></div></div>}
 function Field({label,value,type='text',onChange,options,disabled}){return <label className="block"><span className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</span>{options?<select value={value||''} disabled={disabled} onChange={e=>onChange(e.target.value)} className="mt-1 w-full border rounded-lg px-3 py-2 bg-white disabled:bg-slate-100">{['',...options].map(x=><option key={x} value={x}>{x||'—'}</option>)}</select>:<input type={type} disabled={disabled} value={value??''} onChange={e=>onChange(type==='number'?(e.target.value===''?null:Number(e.target.value)):e.target.value)} className="mt-1 w-full border rounded-lg px-3 py-2 disabled:bg-slate-100"/>}</label>}
+
+function AppLogo({className=''}) {
+  return (
+    <svg viewBox="0 0 120 120" className={className} role="img" aria-label="4 Neighbors logo" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="logoBlue" x1="0" x2="1">
+          <stop offset="0%" stopColor="#0f5ec8"/>
+          <stop offset="100%" stopColor="#0ea5e9"/>
+        </linearGradient>
+      </defs>
+      <rect x="4" y="4" width="112" height="112" rx="26" fill="url(#logoBlue)"/>
+      <g opacity="0.98">
+        <path d="M18 78 L60 36 L102 78" stroke="#f8fafc" strokeWidth="7" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M30 76 V94 H90 V76" fill="none" stroke="#f8fafc" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M50 94 V68 H70 V94" fill="none" stroke="#f8fafc" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
+      </g>
+      <g fill="#0f172a" opacity="0.8">
+        <rect x="16" y="18" width="6" height="10"/>
+        <rect x="28" y="18" width="6" height="10"/>
+        <rect x="40" y="18" width="6" height="10"/>
+        <rect x="74" y="18" width="6" height="10"/>
+        <rect x="86" y="18" width="6" height="10"/>
+        <rect x="98" y="18" width="6" height="10"/>
+      </g>
+      <path d="M18 89 C30 78, 40 72, 52 74 C63 76, 70 84, 80 89 C88 92, 96 95, 102 96" fill="none" stroke="#d9f99d" strokeWidth="5" strokeLinecap="round"/>
+      <circle cx="62" cy="38" r="8" fill="#f6b2a6"/>
+      <path d="M56 38 C56 30, 61 25, 67 25 C73 25, 78 30, 78 38 C78 45, 73 49, 67 52 C61 49, 56 45, 56 38 Z" fill="#f6b2a6"/>
+      <text x="60" y="104" textAnchor="middle" fontSize="9" fontWeight="800" fontFamily="Arial, sans-serif" fill="#f8fafc" letterSpacing="0.5">4 NEIGHBORS</text>
+    </svg>
+  );
+}
 
 // ========== LOGIN ==========
 function LoginScreen({onLogin}){
@@ -171,10 +250,11 @@ function LoginScreen({onLogin}){
   return (
     <div className="min-h-screen login-bg flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center text-white text-2xl mx-auto mb-4"><i className="fa-solid fa-layer-group"></i></div>
-          <h1 className="text-2xl font-extrabold text-slate-900">N4N Tracker</h1>
-          <p className="text-slate-500 text-sm mt-1">Case Management & Housing Intelligence</p>
+        <div className="mb-8 flex items-center justify-center gap-4">
+          <AppLogo className="w-20 h-20 shrink-0" />
+          <div className="text-left">
+            <h1 className="text-2xl font-extrabold text-slate-900 leading-none">N4N Tracker</h1>
+          </div>
         </div>
         {!configOk && (
           <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-900">
@@ -462,7 +542,7 @@ function App(){
     {toast&&<div className={`fixed top-4 right-4 z-[100] px-5 py-3 rounded-xl shadow-lg text-sm font-semibold no-print ${toast.type==='err'?'bg-rose-600 text-white':'bg-emerald-600 text-white'}`}>{toast.msg}</div>}
     {saving&&<div className="fixed inset-0 bg-black/20 z-[90] flex items-center justify-center no-print"><div className="bg-white rounded-xl px-6 py-4 shadow-xl flex items-center gap-3"><i className="fa-solid fa-spinner fa-spin text-blue-600"></i><span className="font-semibold">Saving...</span></div></div>}
     <aside className="sidebar w-72 shrink-0 text-white no-print flex flex-col">
-      <div className="px-6 py-6 border-b border-white/10"><div className="flex items-center gap-3"><div className="w-11 h-11 bg-blue-500 rounded-xl flex items-center justify-center text-xl"><i className="fa-solid fa-layer-group"></i></div><div><div className="font-extrabold text-xl">N4N Tracker</div><div className="text-xs text-blue-200">Supabase · Real-time</div></div></div></div>
+      <div className="px-6 py-6 border-b border-white/10"><div className="flex items-center gap-3"><AppLogo className="w-11 h-11 shrink-0" /><div><div className="font-extrabold text-xl">N4N Tracker</div><div className="text-xs text-blue-200">Giorgio Hotel</div></div></div></div>
       <nav className="p-3 space-y-1 flex-1 overflow-y-auto">{nav.map(n=><button key={n[0]} onClick={()=>setView(n[0])} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition ${view===n[0]?'active text-white':'text-blue-100 hover:bg-white/5'}`}><i className={`${n[1]} w-5`}></i>{n[2]}</button>)}</nav>
       <div className="p-4 border-t border-white/10">
         <div className="text-xs text-blue-200 mb-2 truncate">{session.user?.email}</div>
@@ -620,10 +700,92 @@ function Profile({f,edit,discharge,onPhotoClick}){
     <div className="mt-6"><h3 className="font-bold mb-3">Household Members ({f.members?.length||0})</h3><div className="overflow-auto border rounded-xl"><table className="w-full text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3 text-left">Name</th><th>CARES ID</th><th>Age</th><th>Gender</th><th>HOH</th><th>Status</th></tr></thead><tbody>{(f.members||[]).map((m,i)=><tr className="border-t" key={i}><td className="p-3 font-semibold">{m.firstName} {m.lastName}</td><td className="text-center">{m.caresId}</td><td className="text-center">{m.age}</td><td className="text-center">{m.gender}</td><td className="text-center">{m.hoh?'Yes':''}</td><td className="text-center">{m.unitStatus}</td></tr>)}</tbody></table></div></div>
     <div className="mt-6 border border-rose-200 bg-rose-50/60 p-4 rounded-xl"><div className="flex items-start justify-between gap-4"><div><div className="text-xs font-bold uppercase text-rose-700">Discharge / Case Closure</div><div className="font-bold mt-1">Close and archive this household when services end</div></div><button onClick={discharge} className="no-print shrink-0 px-4 py-2 bg-rose-700 text-white rounded-lg font-semibold"><i className="fa-solid fa-box-archive mr-2"></i>Complete Discharge</button></div></div>
     <div className="mt-6 bg-amber-50 border border-amber-200 p-4 rounded-xl"><div className="text-xs font-bold uppercase text-amber-800 mb-1">Case Notes</div><div className="text-sm whitespace-pre-wrap">{f.caseNotes||'No case notes entered.'}</div></div>
+    <CaseNotesPanel caresId={f.caresId} caseManager={f.caseManager || 'Unassigned'} />
   </div>;
 }
 
 function Section({title,rows}){return <div className="border rounded-xl p-4"><h3 className="font-bold mb-3">{title}</h3><div className="space-y-2">{rows.map(([a,b])=><div className="flex justify-between gap-4 text-sm border-b last:border-0 pb-2 last:pb-0" key={a}><span className="text-slate-500">{a}</span><b className="text-right">{b}</b></div>)}</div></div>}
+
+function CaseNotesPanel({caresId, caseManager}){
+  const [notes, setNotes] = useState([]);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const refreshNotes = useCallback(async()=>{
+    if (!caresId) return;
+    try {
+      const data = await loadCaseNotesForResident(caresId);
+      setNotes(data);
+      setError('');
+    } catch (err) {
+      setError(err?.message || 'Unable to load notes.');
+    }
+  }, [caresId]);
+
+  useEffect(()=>{ refreshNotes(); }, [refreshNotes]);
+
+  useEffect(()=>{
+    if (!caresId) return;
+    const channel = supabase
+      .channel(`case_notes_${caresId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'case_notes', filter: `cares_id=eq.${String(caresId)}` }, () => {
+        refreshNotes();
+      })
+      .subscribe();
+
+    return ()=>{ supabase.removeChannel(channel); };
+  }, [caresId, refreshNotes]);
+
+  const handleSave = async () => {
+    if (!draft.trim()) return;
+    setSaving(true);
+    setError('');
+
+    const result = await saveCaseNote({ caresId, caseManager, noteText: draft });
+    setSaving(false);
+
+    if (result.error) {
+      setError(result.error.message || 'No se pudo guardar la nota.');
+      return;
+    }
+
+    setDraft('');
+    await refreshNotes();
+  };
+
+  return (
+    <div className="mt-6 border rounded-2xl bg-white overflow-hidden">
+      <div className="bg-slate-50 border-b px-4 py-3">
+        <div className="text-xs font-bold uppercase tracking-wide text-slate-600">Case Notes & Historical Log</div>
+      </div>
+      <div className="p-4 space-y-4">
+        <div>
+          <textarea value={draft} onChange={e=>setDraft(e.target.value)} rows="3" className="w-full p-3 border rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="Write the new case note here..." />
+          <div className="flex justify-end mt-2">
+            <button type="button" onClick={handleSave} disabled={saving || !draft.trim()} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
+              {saving ? 'Saving...' : 'Save Note'}
+            </button>
+          </div>
+        </div>
+
+        {error && <div className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-2">{error}</div>}
+
+        <div className="border-t pt-3 space-y-3 max-h-72 overflow-y-auto">
+          {notes.length ? notes.map(note => (
+            <div key={note.id || `${note.created_at}-${note.note_text}`} className="p-3 bg-slate-50 rounded-xl border text-sm">
+              <div className="flex justify-between gap-3 text-xs text-slate-500 mb-2">
+                <span className="font-semibold text-slate-700">{note.case_manager || 'Case Manager'}</span>
+                <span>{new Date(note.created_at).toLocaleString()}</span>
+              </div>
+              <p className="text-slate-800 whitespace-pre-wrap">{note.note_text}</p>
+            </div>
+          )) : <div className="text-sm text-slate-500">No notes for this resident yet.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function Housing({data,query,setQuery,setEdit,floorOptions=[],floorFilter,setFloorFilter,cmNames=[],cmFilter,setCmFilter}){return <div className="space-y-4"><SearchBar query={query} setQuery={setQuery} extra={<>
   <select value={floorFilter} onChange={e=>setFloorFilter(e.target.value)} className="border rounded-lg px-3 py-2"><option value="All">All Floors</option>{floorOptions.map(fl=><option key={fl} value={fl}>Floor {fl}</option>)}</select>
